@@ -33,14 +33,14 @@ def get_wallet_servers_legacy(light_ip_list='', app_log=None, minver='0', as_dic
 
         # Then try the new API
         wallets = []
-        try:
-            rep = requests.get("http://api.bismuth.live/servers/wallet/legacy.json")
+        try: 
+            rep = requests.get("https://bismuth.world/api/legacy.json")
             if rep.status_code == 200:
                 wallets = rep.json()
         except Exception as e:
             app_log.warning("Error {} getting Server list from primary API, trying backup URL".format(e))
             try:
-                rep = requests.get("https://bismuth.world/api/legacy.json")
+                rep = requests.get("http://api.bismuth.live/servers/wallet/legacy.json")
                 if rep.status_code == 200:
                     wallets = rep.json()
             except Exception as e:
