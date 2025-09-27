@@ -434,6 +434,46 @@ class BismuthMultiWallet():
             self._data['addresses'].append(key)
         self.save()
 
+    def import_hd_address(self, hd_wallet, address_index: int, label: str=''):
+        """
+        Import a specific HD wallet address by index into the multiwallet
+        :param hd_wallet: BismuthHDWallet instance
+        :param address_index: Index of the address to import from the HD wallet
+        :param label: Label for the imported address
+        """
+        if self._infos['encrypted'] and self._locked:
+            raise RuntimeError("Wallet must be unlocked")
+        
+        # Derive the specific address at the given index
+        addr_data = hd_wallet.derive_address_at_index(address_index)
+        
+        # Create key dict in the same format as other import methods
+        key = {
+            "private_key": addr_data['private_key'],
+            "public_key": addr_data['public_key'],
+            "address": addr_data['address'],
+            "label": label,
+            "type": "ECDSA",
+            "derivation_path": addr_data['derivation_path'],
+            "timestamp": int(time())
+        }
+        
+        if not key or not key['address']:
+            raise RuntimeWarning("Error importing the HD address.")
+        
+        if self.is_address_in_wallet(key['address']):
+            raise RuntimeError("Duplicate address")
+        
+        self._addresses.append(key)
+        if self._infos['encrypted']:
+            content = json.dumps(key)
+            encrypted = b64encode(encrypt(self._master_password, content, level=1)).decode('utf-8')
+            self._data['addresses'].append(encrypted)
+        else:
+            print('1')
+            self._data['addresses'].append(key)
+        self.save()
+
     def sign_encoded(self, timestamp: float, address:str, recipient:str, amount:float, operation:str, data:str) -> str:
         if address != self._address:
             raise RuntimeWarning("Address mismatch {} vs {}".format(address, self._address))
