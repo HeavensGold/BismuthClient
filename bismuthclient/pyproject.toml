@@ -30,7 +30,8 @@ requires-python = ">=3.5"
 dependencies = [
     "polysign @ git+https://github.com/HeavensGold/polysign.git#subdirectory=polysign",
     "pycryptodomex",
-    "requests"
+    "requests",
+    "bismuth-bip39-tools @ git+https://github.com/HeavensGold/bismuth-bip39-tools.git"
 ]
 
 [project.urls]
