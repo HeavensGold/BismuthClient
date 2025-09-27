@@ -36,9 +36,15 @@ class BismuthHDWallet:
         self._infos = None
         self._derived_keys = {}  # cache derived keys by index
         self._addresses = {}  # cache addresses by index
-        
+
         if wallet_file:
-            self.load(wallet_file, password)
+            # Auto-generate wallet if it doesn't exist
+            if not path.exists(wallet_file):
+                if self.verbose:
+                    print(f"HD wallet file {wallet_file} not found, creating new one")
+                self.generate_new(wallet_file, word_count=24, password=password, label="Auto-generated HD Wallet")
+            else:
+                self.load(wallet_file, password)
 
     def wallet_preview(self, wallet_file: str = 'hd_wallet.json') -> dict:
         """
@@ -81,7 +87,7 @@ class BismuthHDWallet:
             self._infos["address"] = self._address
         return self._infos
 
-    def generate_new(self, wallet_file: str = 'hd_wallet.json', word_count: int = 12, 
+    def generate_new(self, wallet_file: str = 'hd_wallet.json', word_count: int = 24, 
                      password: str = "", label: str = "HD Wallet") -> bool:
         """
         Generate a new HD wallet with a new mnemonic
@@ -103,7 +109,7 @@ class BismuthHDWallet:
         # Generate strength based on word count (128 for 12 words, 256 for 24 words)
         strength = 128 if word_count == 12 else 256 if word_count == 24 else 128
         if word_count not in [12, 24]:
-            strength = 128  # default to 12 words
+            strength = 256  # default to 12 words
             
         # Generate new mnemonic
         mnemonic = generate_mnemonic(strength)
