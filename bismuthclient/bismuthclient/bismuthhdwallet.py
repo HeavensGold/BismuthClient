@@ -147,6 +147,8 @@ class BismuthHDWallet:
             
         # Load the newly created wallet
         self.load(wallet_file, password)
+        # Save again to populate the addresses array with the current address
+        self.save()
         return True
 
     def load(self, wallet_file: str = 'hd_wallet.json', password: str = ""):
@@ -188,6 +190,9 @@ class BismuthHDWallet:
         # Load seed
         self._seed = mnemonic_to_seed(self._mnemonic, password)
         
+# Check if existing addresses in the file match the current mnemonic
+        self._validate_addresses_match_mnemonic(content.get('addresses', []))
+         
         # Set the current address to the first derived address
         self.set_address_index(self._current_index)
         
@@ -225,29 +230,34 @@ class BismuthHDWallet:
         # Update the current index
         content['current_index'] = self._current_index
         
-        # If we have addresses in cache, save them
-        if hasattr(self, '_addresses') and self._addresses:
-            if 'addresses' not in content:
-                content['addresses'] = []
-                
-            # Add current address if not already in the list
-            current_addr_data = {
-                'address': self._address,
-                'index': self._current_index,
-                'derivation_path': self._derivation_path,
-                'timestamp': content.get('timestamp', int(__import__('time').time())),
-                'label': content.get('label', 'HD Wallet')
-            }
+        # Add current address to the addresses list if not present
+        if 'addresses' not in content:
+            content['addresses'] = []
             
-            # Check if address already exists in the list
-            addr_exists = False
-            for addr in content['addresses']:
-                if addr['address'] == self._address:
-                    addr_exists = True
-                    break
-                    
-            if not addr_exists:
-                content['addresses'].append(current_addr_data)
+        # Add current address if not already in the list
+        current_addr_data = {
+            'address': self._address,
+            'index': self._current_index,
+            'derivation_path': self._derivation_path,
+            'timestamp': content.get('timestamp', int(__import__('time').time())),
+            'label': content.get('label', 'HD Wallet')
+        }
+        
+        # Check if address already exists in the list
+        addr_exists = False
+        for addr in content['addresses']:
+            if addr['address'] == self._address:
+                addr_exists = True
+                # Update the index if it's the same address but different index
+                if addr['index'] != self._current_index:
+                    addr['index'] = self._current_index
+                break
+                
+        if not addr_exists:
+            content['addresses'].append(current_addr_data)
+            
+        # Sort addresses by index
+        content['addresses'].sort(key=lambda x: x['index'])
         
         # Add type info if not present
         content['type'] = 'HD-ECDSA'
@@ -281,6 +291,73 @@ class BismuthHDWallet:
         
         return addr_data
 
+    def get_address_at_index(self, index: int) -> Dict[str, str]:
+        """
+        Get an address at a specific index and save it to the wallet file
+        
+        Args:
+            index: Index to get address from
+            
+        Returns:
+            Dictionary with address, private_key, public_key, and derivation_path
+        """
+        # Derive the address at the specified index
+        addr_data = self.derive_address_at_index(index)
+        
+        # Update current state to the requested address
+        self._current_index = index
+        self._address = addr_data['address']
+        self._derivation_path = addr_data['derivation_path']
+        self.key = addr_data['private_key']
+        self.public_key = addr_data['public_key']
+        
+        # Update info
+        if self._infos:
+            self._infos["address"] = self._address
+            self._infos['current_index'] = self._current_index
+            self._infos['derivation_path'] = self._derivation_path
+            
+        # Save the address to the wallet file if it's not already there
+        self.save()
+            
+        return addr_data
+
+    def fill_address_gaps(self) -> List[Dict[str, str]]:
+        """
+        Fill all gaps in the address sequence and save all missing addresses to the wallet file
+        
+        Returns:
+            List of dictionaries with address data for all filled addresses
+        """
+        # Load current wallet file to get the existing addresses
+        with open(self._wallet_file, 'r') as f:
+            content = json.load(f)
+            
+        # Get existing addresses
+        existing_addresses = content.get('addresses', [])
+        if not existing_addresses:
+            return []
+            
+        # Find the min and max indices
+        indices = [addr['index'] for addr in existing_addresses]
+        min_index = min(indices)
+        max_index = max(indices)
+        
+        # Generate all addresses in the range
+        filled_addresses = []
+        for i in range(min_index, max_index + 1):
+            # Check if this index already exists
+            exists = any(addr['index'] == i for addr in existing_addresses)
+            if not exists:
+                # Generate and save the missing address
+                addr_data = self.get_address_at_index(i)
+                filled_addresses.append(addr_data)
+                
+        # Reload the current address (the one that was originally current)
+        self.set_address_index(self._current_index)
+        
+        return filled_addresses
+
     def set_address_index(self, index: int):
         """
         Set the current address to the one at the specified index
@@ -309,7 +386,18 @@ class BismuthHDWallet:
         Returns:
             Dictionary with address, private_key, public_key, and derivation_path
         """
-        new_index = self._current_index + 1
+        # Load current wallet file to get the latest state
+        with open(self._wallet_file, 'r') as f:
+            content = json.load(f)
+            
+        # Find the highest index in the existing addresses
+        existing_addresses = content.get('addresses', [])
+        if existing_addresses:
+            max_index = max(addr['index'] for addr in existing_addresses)
+            new_index = max_index + 1
+        else:
+            new_index = self._current_index + 1
+            
         addr_data = self.derive_address_at_index(new_index)
         
         # Update current state to the new address
@@ -324,6 +412,9 @@ class BismuthHDWallet:
             self._infos["address"] = self._address
             self._infos['current_index'] = self._current_index
             self._infos['derivation_path'] = self._derivation_path
+            
+        # Save the new address to the wallet file
+        self.save()
             
         return addr_data
 
@@ -410,3 +501,74 @@ class BismuthHDWallet:
         """
         addresses = derive_addresses(self._mnemonic, start=0, count=count)
         return addresses
+
+    def _validate_addresses_match_mnemonic(self, existing_addresses: list):
+        """
+        Validate that existing addresses in the file match the current mnemonic.
+        If they don't match, warn the user and clear the address list.
+        
+        Args:
+            existing_addresses: List of existing addresses from the file
+        """
+        if not existing_addresses:
+            return
+            
+        mismatched = []
+        for addr_data in existing_addresses:
+            index = addr_data.get('index')
+            expected_address = addr_data.get('address')
+            
+            if index is not None and expected_address:
+                # Derive the address at this index from the current mnemonic
+                try:
+                    derived_addresses = derive_addresses(self._mnemonic, start=index, count=1)
+                    if derived_addresses:
+                        derived_address = derived_addresses[0]['address']
+                        if derived_address != expected_address:
+                            mismatched.append((index, expected_address, derived_address))
+                except Exception:
+                    # If derivation fails, count as mismatch
+                    mismatched.append((index, expected_address, "DERIVATION_FAILED"))
+        
+        if mismatched:
+            print("WARNING: Some addresses in the wallet file do not match the current mnemonic!")
+            print("This may indicate the mnemonic has been changed manually.")
+            print("Mismatched addresses:")
+            for index, expected, derived in mismatched:
+                print(f"  Index {index}: Expected {expected}, Derived {derived}")
+            print("Clearing the address list to start fresh with the current mnemonic.")
+            print("Please confirm this action (type 'yes' to proceed):")
+            
+            # Simple confirmation logic - no exceptions needed
+            user_input = input().strip().lower()
+            if user_input == 'yes':
+                self._clear_addresses_list()
+                # Reset the current index to 0
+                self._current_index = 0
+            else:
+                print("Action cancelled. Stopping wallet loading process.")
+                # Exit the program completely
+                import sys
+                sys.exit(1)
+    
+    def _clear_addresses_list(self):
+        """
+        Clear the address list in the file and save it
+        """
+        # Load current wallet file to get the existing content
+        if self._wallet_file and path.exists(self._wallet_file):
+            try:
+                with open(self._wallet_file, 'r') as f:
+                    content = json.load(f)
+                
+                # Clear the addresses list
+                content['addresses'] = []
+                content['current_index'] = 0
+                
+                # Save the updated content
+                with open(self._wallet_file, 'w') as f:
+                    json.dump(content, f, indent=4)
+                    
+                print("Address list cleared in the file. Starting fresh with the current mnemonic.")
+            except Exception as e:
+                print(f"Error clearing address list: {e}")

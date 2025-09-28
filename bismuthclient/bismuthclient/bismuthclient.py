@@ -435,16 +435,24 @@ class BismuthClient():
 
         :param wallet_file: string, an HD wallet file (hd_wallet.json)
         :param password: string, password for encrypted HD wallets
+        :return: self for method chaining
         """
         # Default values, fail
         self.wallet_file = None
         self.address = None
         self._wallet = None
         self._wallet = BismuthHDWallet(wallet_file, verbose=self.verbose, password=password)
+        
+        # Check if wallet was just created and save the first address
+        if not self._wallet._infos.get('addresses'):
+            # Save the current address to the wallet file
+            self._wallet.save()
+        
         self.wallet_file = wallet_file
         if self.address != self._wallet.address:
             self.clear_cache()
         self.address = self._wallet.address
+        return self
 
     def set_address(self, address: str=''):
         if not type(self._wallet) == BismuthMultiWallet:
