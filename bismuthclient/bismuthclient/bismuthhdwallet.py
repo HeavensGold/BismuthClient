@@ -13,6 +13,11 @@ from bismuth_bip39_tools.mnemonic import generate_mnemonic
 from bismuthclient.bismuth_ecdsa_crypto import BismuthECDSACrypto
 
 
+class MnemonicMismatchException(Exception):
+    """Raised when addresses in wallet file don't match the current mnemonic"""
+    pass
+
+
 class BismuthHDWallet:
     """
     HD wallet class that supports BIP39 mnemonics and ECDSA cryptography for Bismuth
@@ -22,7 +27,7 @@ class BismuthHDWallet:
                  '_encrypted', '_current_index', '_derivation_path', '_mnemonic', '_seed',
                  '_derived_keys', '_addresses')
 
-    def __init__(self, wallet_file: str = None, verbose: bool = False, password: str = ""):
+    def __init__(self, wallet_file: str = None, verbose: bool = False, password: str = "", mnemonic: str = ""):
         self._wallet_file = None
         self._address = None
         self._current_index = 0
@@ -42,7 +47,7 @@ class BismuthHDWallet:
             if not path.exists(wallet_file):
                 if self.verbose:
                     print(f"HD wallet file {wallet_file} not found, creating new one")
-                self.generate_new(wallet_file, word_count=24, password=password, label="Auto-generated HD Wallet")
+                self.generate_new(wallet_file, word_count=24, password=password, label="Auto-generated HD Wallet", mnemonic=mnemonic)
             else:
                 self.load(wallet_file, password)
 
@@ -88,15 +93,16 @@ class BismuthHDWallet:
         return self._infos
 
     def generate_new(self, wallet_file: str = 'hd_wallet.json', word_count: int = 24, 
-                     password: str = "", label: str = "HD Wallet") -> bool:
+                     password: str = "", label: str = "HD Wallet", mnemonic: str = "") -> bool:
         """
-        Generate a new HD wallet with a new mnemonic
+        Generate a new HD wallet with a new or existing mnemonic
         
         Args:
             wallet_file: Path to save the wallet
-            word_count: Number of words in mnemonic (12 or 24)
+            word_count: Number of words in mnemonic (12 or 24) - ignored if mnemonic is provided
             password: Optional password to encrypt the wallet
             label: Label for the wallet
+            mnemonic: Existing mnemonic to use (if empty, generates new one)
             
         Returns:
             True if successful, False otherwise
@@ -106,13 +112,17 @@ class BismuthHDWallet:
                 print(f"Wallet file {wallet_file} already exists, not overwriting")
             return False
             
-        # Generate strength based on word count (128 for 12 words, 256 for 24 words)
-        strength = 128 if word_count == 12 else 256 if word_count == 24 else 128
-        if word_count not in [12, 24]:
-            strength = 256  # default to 12 words
-            
-        # Generate new mnemonic
-        mnemonic = generate_mnemonic(strength)
+        if mnemonic:
+            # Use provided mnemonic and validate it
+            mnemonic = check_mnemonic(mnemonic)
+        else:
+            # Generate strength based on word count (128 for 12 words, 256 for 24 words)
+            strength = 128 if word_count == 12 else 256 if word_count == 24 else 128
+            if word_count not in [12, 24]:
+                strength = 256  # default to 24 words
+                
+            # Generate new mnemonic
+            mnemonic = generate_mnemonic(strength)
         
         # Save wallet with encrypted mnemonic if password provided
         if password:
@@ -505,10 +515,13 @@ class BismuthHDWallet:
     def _validate_addresses_match_mnemonic(self, existing_addresses: list):
         """
         Validate that existing addresses in the file match the current mnemonic.
-        If they don't match, warn the user and clear the address list.
+        Raises MnemonicMismatchException if addresses don't match the current mnemonic.
         
         Args:
             existing_addresses: List of existing addresses from the file
+            
+        Raises:
+            MnemonicMismatchException: When addresses in wallet file don't match current mnemonic
         """
         if not existing_addresses:
             return
@@ -531,25 +544,12 @@ class BismuthHDWallet:
                     mismatched.append((index, expected_address, "DERIVATION_FAILED"))
         
         if mismatched:
-            print("WARNING: Some addresses in the wallet file do not match the current mnemonic!")
-            print("This may indicate the mnemonic has been changed manually.")
-            print("Mismatched addresses:")
-            for index, expected, derived in mismatched:
-                print(f"  Index {index}: Expected {expected}, Derived {derived}")
-            print("Clearing the address list to start fresh with the current mnemonic.")
-            print("Please confirm this action (type 'yes' to proceed):")
-            
-            # Simple confirmation logic - no exceptions needed
-            user_input = input().strip().lower()
-            if user_input == 'yes':
-                self._clear_addresses_list()
-                # Reset the current index to 0
-                self._current_index = 0
-            else:
-                print("Action cancelled. Stopping wallet loading process.")
-                # Exit the program completely
-                import sys
-                sys.exit(1)
+            mismatched_indices = [m[0] for m in mismatched]
+            raise MnemonicMismatchException(
+                f"Addresses in wallet file do not match current mnemonic. "
+                f"Mismatched indices: {mismatched_indices}. "
+                f"Use _clear_addresses_list() method to reset if intentional."
+            )
     
     def _clear_addresses_list(self):
         """

@@ -1,7 +1,7 @@
 # BismuthHDWallet New Methods Summary
 
 ## Overview
-This document summarizes the new methods implemented in the `BismuthHDWallet` class to improve address management, security validation, and workflow consistency.
+This document summarizes the new methods and improvements implemented in the `BismuthHDWallet` class to improve address management, security validation, workflow consistency, and mnemonic import capabilities.
 
 ## New Methods
 
@@ -148,6 +148,132 @@ The wallet file now maintains addresses in sorted order:
 }
 ```
 
+## Latest Updates (Library-Safe Error Handling & Mnemonic Import)
+
+### 6. `MnemonicMismatchException`
+**Purpose**: Custom exception for library-safe error handling when addresses don't match mnemonic
+
+**Location**: `bismuthhdwallet.py` (line 18)
+
+**Key Features**:
+- **Library-appropriate**: Replaces interactive prompts and `sys.exit()` calls
+- **Specific exception type**: Allows client applications to catch and handle mnemonic mismatches programmatically
+- **Clear error messages**: Provides actionable information about which indices are mismatched
+- **Follows existing patterns**: Consistent with `DecryptionException` and `EncryptionException` in the codebase
+
+### 7. Enhanced `_validate_addresses_match_mnemonic()`
+**Purpose**: Library-safe validation that raises exceptions instead of interactive prompts
+
+**Location**: `BismuthHDWallet.py` (lines 510-542)
+
+**Behavior Changes**:
+- **Before**: Used `input()` prompts and `sys.exit(1)` - inappropriate for library use
+- **After**: Raises `MnemonicMismatchException` with detailed error information
+- **Error message includes**: List of mismatched indices and guidance on resolution
+
+**Key Features**:
+- **Non-blocking**: No interactive prompts that halt execution
+- **Programmatic handling**: Client applications can catch and handle errors appropriately
+- **Detailed diagnostics**: Clear information about what went wrong and how to fix it
+
+### 8. Enhanced `load_hd_wallet()` Method (BismuthClient)
+**Purpose**: Support importing mnemonics from other wallet applications
+
+**Location**: `bismuthclient.py` (lines 432-455)
+
+**New Signature**:
+```python
+def load_hd_wallet(self, wallet_file='hd_wallet.json', password: str = "", mnemonic: str = "")
+```
+
+**Behavior**:
+- **Mnemonic parameter**: When provided, uses existing mnemonic instead of generating new one
+- **Import capability**: Enables importing wallets from MetaMask, Electrum, and other BIP39-compatible applications
+- **Fallback logic**: If no mnemonic provided, behaves exactly as before (backward compatible)
+
+### 9. Enhanced `BismuthHDWallet.__init__()`
+**Purpose**: Support mnemonic parameter in wallet initialization
+
+**Location**: `BismuthHDWallet.py` (lines 28-52)
+
+**New Signature**:
+```python
+def __init__(self, wallet_file: str = None, verbose: bool = False, password: str = "", mnemonic: str = "")
+```
+
+**Key Features**:
+- **Mnemonic passthrough**: Forwards mnemonic parameter to `generate_new()` method
+- **Maintains compatibility**: All existing code continues to work unchanged
+
+### 10. Enhanced `generate_new()` Method
+**Purpose**: Support creating wallets with existing mnemonics
+
+**Location**: `BismuthHDWallet.py` (lines 95-119)
+
+**New Signature**:
+```python
+def generate_new(self, wallet_file: str = 'hd_wallet.json', word_count: int = 24, 
+                 password: str = "", label: str = "HD Wallet", mnemonic: str = "") -> bool
+```
+
+**Behavior**:
+- **Mnemonic validation**: If mnemonic provided, validates it using `check_mnemonic()`
+- **Generation fallback**: If no mnemonic provided, generates new one based on `word_count`
+- **Import workflow**: Enables creating wallets with mnemonics from external sources
+
+## Error Handling Improvements
+
+### Before (Library-Unsafe)
+```python
+print("WARNING: Some addresses in the wallet file do not match the current mnemonic!")
+print("Please confirm this action (type 'yes' to proceed):")
+user_input = input().strip().lower()
+if user_input != 'yes':
+    import sys
+    sys.exit(1)
+```
+
+### After (Library-Safe)
+```python
+raise MnemonicMismatchException(
+    f"Addresses in wallet file do not match current mnemonic. "
+    f"Mismatched indices: {mismatched_indices}. "
+    f"Use _clear_addresses_list() method to reset if intentional."
+)
+```
+
+## Import Workflow Examples
+
+### Importing from External Wallet
+```python
+from bismuthclient.bismuthclient import BismuthClient
+from bismuthclient.bismuthhdwallet import MnemonicMismatchException
+
+# Import mnemonic from MetaMask/Electrum/etc.
+external_mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+
+try:
+    client = BismuthClient()
+    client.load_hd_wallet('imported_wallet.json', password="", mnemonic=external_mnemonic)
+    print(f"Successfully imported wallet: {client.address}")
+except Exception as e:
+    print(f"Import failed: {e}")
+```
+
+### Handling Mnemonic Mismatches
+```python
+try:
+    client = BismuthClient()
+    client.load_hd_wallet('existing_wallet.json')
+except MnemonicMismatchException as e:
+    print(f"Mnemonic mismatch detected: {e}")
+    # Client application decides what to do:
+    # - Prompt user to confirm clearing addresses
+    # - Load with different mnemonic
+    # - Show error and abort
+    # - Automatically clear and proceed (if appropriate)
+```
+
 ## Backward Compatibility
 
-These changes maintain backward compatibility with existing HD wallet files while adding new security features. Existing wallets will continue to work with the enhanced validation and management capabilities.
+These changes maintain full backward compatibility with existing HD wallet files while adding new security features and import capabilities. Existing wallets will continue to work with the enhanced validation and management capabilities, but now with proper library-safe error handling.

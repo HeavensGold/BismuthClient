@@ -14,7 +14,7 @@ from datetime import timedelta
 from bismuthclient import bismuthapi
 from bismuthclient.bismuthwallet import BismuthWallet
 from bismuthclient.bismuthmultiwallet import BismuthMultiWallet
-from bismuthclient.bismuthhdwallet import BismuthHDWallet
+from bismuthclient.bismuthhdwallet import BismuthHDWallet, MnemonicMismatchException
 from bismuthclient import bismuthcrypto
 from bismuthclient import rpcconnections
 from bismuthclient import lwbench
@@ -429,19 +429,20 @@ class BismuthClient():
             self.clear_cache()
         self.address = self._wallet.address
 
-    def load_hd_wallet(self, wallet_file='hd_wallet.json', password: str = ""):
+    def load_hd_wallet(self, wallet_file='hd_wallet.json', password: str = "", mnemonic: str = ""):
         """
         Tries to load an HD wallet file
 
         :param wallet_file: string, an HD wallet file (hd_wallet.json)
         :param password: string, password for encrypted HD wallets
+        :param mnemonic: string, mnemonic to use when creating new wallet (if wallet_file doesn't exist)
         :return: self for method chaining
         """
         # Default values, fail
         self.wallet_file = None
         self.address = None
         self._wallet = None
-        self._wallet = BismuthHDWallet(wallet_file, verbose=self.verbose, password=password)
+        self._wallet = BismuthHDWallet(wallet_file, verbose=self.verbose, password=password, mnemonic=mnemonic)
         
         # Check if wallet was just created and save the first address
         if not self._wallet._infos.get('addresses'):
